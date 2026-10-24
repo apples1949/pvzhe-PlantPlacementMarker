@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 2,
+  "id": "plantplacementmarker",
+  "name": "种植位置标识",
+  "version": "2.8.1",
+  "author": "apples1949",
+  "description": "选中卡牌时，在所有可种植的位置显示标识；支持圆圈+十字 / 四角+十字 / 整行整列三种样式，可配色、可调粗细、可关掉中心十字。",
+  "playInstructions": "1. 在选卡栏点选一张卡牌，场上所有能种的位置会立刻出现标识。\n2. 样式、颜色、粗细、中心十字开关都在：选项 → Mod 管理 → 种植位置标识 → 配置。\n3. 「整行整列」样式会以鼠标所在格为交点，横竖各画一条色带（十字准星效果）。\n4. 所有样式都是实时绘制的矢量图形，不占贴图内存，缩放不会模糊。",
+  "dependencies": [],
+  "conflicts": [],
+  "provides": {},
+  "overrides": {},
+  "scripts": [],
+  "settings": [
+    {
+      "key": "enabled",
+      "type": "bool",
+      "label": "启用种植位置标识",
+      "group": "显示",
+      "description": "关闭后选中卡牌时不再显示任何标识。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": true
+    },
+    {
+      "key": "style",
+      "type": "enum",
+      "label": "标识样式",
+      "group": "显示",
+      "description": "圆圈+十字：圆环反复放大缩小。四角+十字：四个角向中心来回移动。整行整列：以鼠标格为交点画横竖两条色带。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": "circle",
+      "options": [
+        {
+          "value": "circle",
+          "label": "圆圈 + 十字"
+        },
+        {
+          "value": "corners",
+          "label": "四角 + 十字"
+        },
+        {
+          "value": "rowcol",
+          "label": "整行整列（十字准星）"
+        }
+      ]
+    },
+    {
+      "key": "thickness",
+      "type": "enum",
+      "label": "线条粗细",
+      "group": "显示",
+      "description": "预设粗细档位。圆圈/四角样式控制描边粗细；整行整列样式控制色带宽度（该样式不做缩放动画，宽度恒定）。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": "normal",
+      "options": [
+        {
+          "value": "thin",
+          "label": "细"
+        },
+        {
+          "value": "normal",
+          "label": "标准"
+        },
+        {
+          "value": "thick",
+          "label": "粗"
+        },
+        {
+          "value": "xlarge",
+          "label": "极粗"
+        }
+      ]
+    },
+    {
+      "key": "allowSuperBigMap",
+      "type": "bool",
+      "label": "在超级大地图也生效",
+      "group": "显示",
+      "description": "关闭后，格子总数超过 100 的超大地图（如 27x15 的超级大草坪）上不显示本标识；普通图（9x6、11x7）不受影响。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": true
+    },
+    {
+      "key": "showCenterCross",
+      "type": "bool",
+      "label": "显示中心十字",
+      "group": "显示",
+      "description": "关闭后只画圆环 / 四角 / 色带，中间不画十字。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": true
+    },
+    {
+      "key": "color",
+      "type": "color",
+      "label": "标识颜色",
+      "group": "显示",
+      "description": "三种样式共用的颜色。浅色草地上建议纯白；雪地/白底建议换深色或用半透明。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": "#FFFFFF"
+    },
+    {
+      "key": "markerScale",
+      "type": "float",
+      "label": "标识大小倍率",
+      "group": "显示",
+      "description": "整体缩放标识（1.0 = 以格子边长为基准）。觉得圆圈/四角太小就往 1.2~1.5 调。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": 1.0,
+      "min": 0.5,
+      "max": 2.0,
+      "step": 0.1
+    },
+    {
+      "key": "offsetX",
+      "type": "float",
+      "label": "横向微调（向右为正）",
+      "group": "显示",
+      "description": "标识整体左右挪动（世界像素）。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": 0.0,
+      "min": -60.0,
+      "max": 60.0,
+      "step": 1.0
+    },
+    {
+      "key": "offsetY",
+      "type": "float",
+      "label": "纵向微调（向下为正）",
+      "group": "显示",
+      "description": "标识整体上下挪动（世界像素）。实测 Backyard 需要 +16（默认已设）；个别图偏了再调。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": 16.0,
+      "min": -60.0,
+      "max": 60.0,
+      "step": 1.0
+    },
+    {
+      "key": "rowPitchScale",
+      "type": "float",
+      "label": "行高倍率",
+      "group": "显示",
+      "description": "行高倍率：仅当某张自制图的行距确实与 gridSize.Y 不一致时才需要（实测 Backyard 行距是均匀的，保持 1.0）。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": 1.0,
+      "min": 0.8,
+      "max": 1.3,
+      "step": 0.005
+    },
+    {
+      "key": "debugShowGrid",
+      "type": "bool",
+      "label": "诊断：不选卡也画全部格子",
+      "group": "诊断",
+      "description": "仅排错用。开启后即使没选卡也会把整片草坪的格子按当前样式画出来，用来区分“渲染/坐标不对”和“选卡判定不对”。正常游玩请关闭。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": false
+    },
+    {
+      "key": "debugScreenshot",
+      "type": "bool",
+      "label": "诊断：自动截图",
+      "group": "诊断",
+      "description": "标识出现约 1.2 秒后，自动把整屏保存为 user://PlantPlacementMarker_shot.png，并把绝对路径打进 godot.log。仅排错用，正常游玩请关闭。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": false
+    },
+    {
+      "key": "debugSmoke",
+      "type": "bool",
+      "label": "诊断：冒烟测试（屏幕中央画标记）",
+      "group": "诊断",
+      "description": "仅排错用。开启后即使不在战斗里，也会在屏幕正中画一个「圆环+十字」，用来单独验证绘制链路是否可用。正常游玩请关闭。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": false
+    },
+    {
+      "key": "enableLog",
+      "type": "bool",
+      "label": "输出诊断日志",
+      "group": "诊断",
+      "description": "排查问题时打开，会把运行状态写进 godot.log。平时关掉。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": false
+    },
+    {
+      "key": "aboutChangelog",
+      "type": "text",
+      "label": "更新历史",
+      "group": "关于",
+      "content": "v2.8.1 · 2026-10-24\n· 暂停判定补强：除 SceneTree.Paused 外，还检查 currentControl.waitPause（游戏暂停菜单自己的标记）——ESC 暂停且仍选着卡时不再显示/跟随。\n\nv2.8.0 · 2026-10-24\n· 修：暂停（ESC/暂停菜单）时标识仍跟着鼠标 —— 现在检测 SceneTree.Paused，暂停即隐藏。\n· 修：颜色设置无效 —— 宿主把 color 归一化成 Godot.Color，旧代码只认字符串，永远回落到白色。\n· 新增「在超级大地图也生效」开关（格子总数 >100 才算超大地图，默认开）。\n\nv2.7.2 · 2026-10-24\n· 「整行整列」样式去掉缩放动画：色带宽度恒定等于粗细档位值，不再随时间变宽变窄（只有圆圈/四角保留脉动）。\n\nv2.7.1 · 2026-10-24\n· 纠正 v2.7.0 的错误校准：用玩家截图逐行反推后确认 Backyard 美术行距**是均匀的 gridSize.Y**，偏差只是**常数 −16 世界像素**（不是行距问题）。⇒ 恢复 offsetY 默认 16，行高倍率保持 1.0。\n\nv2.7.0 · 2026-10-24\n· 新增「按图行高校准」：Backyard 系列内置 originDelta=+2、pitchScale=92.5/85≈1.088（实测该系列美术草坪顶边≈62、行距≈92.5，而配置是 60/85）——修「越往下越偏上」。\n· 新增「行高倍率」供其他地图自行校正；纵向微调默认回到 0。\n\nv2.6.2 · 2026-10-24\n· 打开「输出诊断日志」时也会在标识出现后自动存一张截图（每个可见期一张），方便定位偏移，不需要额外开别的开关。\n\nv2.6.1 · 2026-10-24\n· 按实测截图校正：纵向微调默认值 0 → 16（Backyard 9×6 夜间图，格子 78×85）。\n\nv2.6.0 · 2026-10-24\n· 定位改为「格子中心 − 该格 groundHeightCurve 偏移」（与游戏取格公式同源），修「标识整体偏上」；启动日志会打印首格曲线偏移值。\n\nv2.5.1 · 2026-10-24\n· 诊断开关「不选卡也画全部格子」同时画出格子边框（截图即可精确读出偏移量）。\n· 退出时先退订配置事件，消除宿主“需要重启”的告警。\n\nv2.5.0 · 2026-10-24\n· 坐标基准改为「地图美术坐标系」（spriteNode⁻¹ · mapNode）：格子坐标本就是地图贴图像素坐标，之前按 spriteNode 空间画会整体偏移/逐行漂移。\n\nv2.4.0 · 2026-10-24\n· 定位改用游戏自己的落点 API GetMapCellPlantPos（角色就用它摆位），修「标识整体偏上」。\n· 新增横向/纵向微调（-60~60 世界像素）。\n\nv2.3.0 · 2026-10-24\n· 三种样式的几何构建抽成纯函数，启动时自检一遍（日志出现「自检：圆圈/四角几何 OK」）——以后某个样式必崩会在启动就暴露，不用等用户切到那档。\n\nv2.2.2 · 2026-10-24\n· 修「四角+十字」样式一条都画不出来：DrawCorners 里点数组容量算少 1 格，抛 IndexOutOfRangeException 被静默捕获（圆圈样式不受影响）。\n\nv2.2.1 · 2026-10-24\n· 修正日志构建标签（此前一直显示 v2.0.0，容易误判装的是哪版）。\n\nv2.2.0 · 2026-10-24\n· 新增「标识大小倍率」(0.5~2.0，默认 1.0)：整体缩放圆圈/四角/十字，觉得小就直接调大。\n\nv2.1.0 · 2026-10-24\n· 新增诊断开关「冒烟测试」：不在战斗里也在屏幕中央画一个圆环+十字，用来单独验证绘制链路（已实机截图确认可用）。\n· 修复列宽/行高说明中的版本号；`selfcheck_launch.py` 支持一键开诊断+启动+自动截图+还原。\n\nv2.0.0 · 2026-10-24\n· 重写绘制层：改用 RenderingServer 的 canvas_item，彻底解决「装上了但完全没效果」。根因是本 Mod 的程序集不含 Godot 源码生成器，自定义 Node 子类的 _Process/_Draw 引擎不会回调，v1.x 因此一行不画也无日志。\n· 新增启动即打印的三行证据：入口已加载 / 帧回调已开始运行 / 绘制画布已挂到 spriteNode。\n\nv1.0.5 · 2026-10-24\n· 每次启动后第一次真正画出标识时，无条件在 godot.log 打一行「首次显示：样式/可种格/网格/格尺寸/原点」——不依赖诊断开关，便于事后核对是否真的生效。\n\nv1.0.4 · 2026-10-24\n· 新增诊断开关「自动截图」：标识出现 1.2s 后自动把整屏存成 PNG 并打印绝对路径（免人工截图描述）。\n\nv1.0.3 · 2026-10-24\n· 新增诊断开关「不选卡也画全部格子」：用于区分“渲染/坐标问题”与“选卡判定问题”。\n\nv1.0.2 · 2026-10-24\n· 修：地图 lineUse 数组为空时，原实现会把所有行判成不可用 ⇒ 一个标识都不画（现已改为数组为空就跳过该过滤）。\n\nv1.0.1 · 2026-10-23\n· 画面异常不再静默：_Process/_Draw 出错会写一条警告到 godot.log（便于定位\"标识不出\"）。\n\nv1.0.0 · 2026-10-23\n首发：选中卡牌时在全部可种植格显示标识。\n· 三种样式：圆圈+十字 / 四角+十字 / 整行整列（十字准星）。\n· 可配置：样式、粗细（4 档预设）、颜色、中心十字开关。\n· 单节点实现：一个 Node2D 用 _Draw 程序化绘制，不吃贴图、不用序列帧。"
+    }
+  ],
+  "runtimeAssembly": "Runtime/ModAssembly.dll",
+  "runtimeEntryType": "PlantPlacementMarkerEntry",
+  "runtimeApiVersion": 3,
+  "runtimeAssemblyPolicy": "optional",
+  "blueprints": [],
+  "translations": [],
+  "resources": [
+    "Runtime/ModAssembly.dll"
+  ]
+}

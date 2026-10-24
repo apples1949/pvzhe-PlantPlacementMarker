@@ -1,0 +1,9 @@
+{
+  "dllMd5": "e6f1b23136a6b5560a1254f2a669729bfdfc95f6bd461396818a0de8ddecdbce",
+  "modVersion": "2.8.1",
+  "sources": {
+    "PlantPlacementMarker.csproj": "39d9479fbd0a83b6fa49710b55e828f127e1e6d0040c22cf1b8c7242be3ab0cf",
+    "PlantPlacementMarkerEntry.cs": "43f33693e5517608e1fd2292cb88cf0eb886f09df6d6b54e76abd24088ae9d49",
+    "mod.json": "f710283e7f6e06ec8eab602afd99a97132e5a01503231b868f638ffcda1f6bcb"
+  }
+}
