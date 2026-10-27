@@ -61,6 +61,11 @@ public struct MarkerSettings
 	public float OffsetY;        // 位置微调（世界像素，向下为正）
 	public float RowPitchScale;  // 行高倍率：修正「美术行高 ≠ gridSize.Y」导致的下行漂移
 	public bool AllowSuperBigMap; // 是否在超级大地图（如 27x15）上也生效
+	/// <summary>
+	/// ★ v2.8.3：手套正在搬运植物时是否也按本 Mod 的样式显示可放置位置。
+	/// 复用被搬植物自己的 packet 配置 ⇒ 与选卡时的判定/画法/配色**完全一致**。
+	/// </summary>
+	public bool GloveHint;
 
 	public static MarkerSettings Default()
 	{
@@ -78,7 +83,8 @@ public struct MarkerSettings
 			OffsetX = 0f,
 			OffsetY = 16f,
 			RowPitchScale = 1f,
-			AllowSuperBigMap = true
+			AllowSuperBigMap = true,
+			GloveHint = true
 		};
 	}
 
@@ -117,7 +123,7 @@ public struct MarkerSettings
 public sealed class PlantPlacementMarkerEntry : IXWModRuntimeEntry
 {
 	internal const string LogPrefix = "[PlantPlacementMarker] ";
-	internal const string BuildTag = "v2.8.1";
+	internal const string BuildTag = "v2.8.4";
 
 	private XWModRuntimeContext _context;
 	private SceneTree _tree;
@@ -246,6 +252,11 @@ public sealed class PlantPlacementMarkerEntry : IXWModRuntimeEntry
 
 	private void OnFrame()
 	{
+		// ★ v2.8.2：配置页「关于」栏收款码（共享组件 SponsorQrInjector.cs；内部自带 30 帧节流 +
+		//   插好后停止全树查找）。modName 必须与 mod.json 的 name 逐字一致 —— 注入器靠
+		//   「该富文本是否以本 Mod 名开头」判定归属，不匹配就一个字都不会插。
+		try { SponsorQrInjector.Tick(Engine.GetMainLoop() as SceneTree, "种植位置标识", PluginContext?.PackageRoot ?? "", "Resources/SponsorQR.png"); } catch { }
+
 		try
 		{
 			if (!_frameLogged)
@@ -289,6 +300,7 @@ public sealed class PlantPlacementMarkerEntry : IXWModRuntimeEntry
 		s.OffsetY = ReadFloat(ctx, "offsetY", 16f);
 		s.RowPitchScale = ReadFloat(ctx, "rowPitchScale", 1f);
 		s.AllowSuperBigMap = ReadBool(ctx, "allowSuperBigMap", true);
+		s.GloveHint = ReadBool(ctx, "gloveHint", true);
 		EnableLog = ReadBool(ctx, "enableLog", false);
 		Settings = s;
 	}
@@ -529,10 +541,42 @@ internal static class MarkerPainter
 		TowerDefensePacketConfig packetConfig =
 			(picking && GodotObject.IsInstanceValid(packet)) ? packet.config : null;
 
-		// ---- 没选卡 ----
-		if (packetConfig == null)
+		// ---- ★ v2.8.4 手套两态 ----
+		// 玩家反馈：「没选中植物前应该只能显示已有植物的位置」——`glovePick` 在**刚打开手套、
+		// 还没拿起任何植物**时就已经是 true，所以不能拿它当"正在搬运"。
+		// 两态：
+		//   ① 手套已打开但**没拿起植物**（glovePick && pickedCharacter == null）
+		//      ⇒ 只标"已有植物、且手套真的能拿起来"的格子（判据照抄宿主 ProcessGloveSelect）；
+		//   ② 已拿起植物（pickedCharacter != null）⇒ 标"能放置"的格子（CanPacketPlant(packet)）。
+		// 两种状态共用同一份 `_cells` 与同一个 `Draw` ⇒ 样式完全一致，只有"哪些格算有效"的谓词不同。
+		// `gloveSource` = 被拿起植物的源格：宿主 ProcessGlovePlace 里明确**不允许放回源格**，
+		// 所以拾取态把这个格排除掉（否则会提示一个放了没反应的格子）。
+		bool gloveAllCells = false;
+		bool gloveIdle = false;
+		Vector2I gloveSource = new Vector2I(int.MinValue, int.MinValue);
+		int gloveMode = 0;   // 0 = 与手套无关 / 1 = 手套空闲（未拿起）/ 2 = 已拿起
+		if (packetConfig == null && cfg.GloveHint && IsGlovePicking())
 		{
-			if (cfg.DebugShowGrid)
+			if (HasGlovePickedCharacter(out gloveSource))
+			{
+				gloveMode = 2;
+				packetConfig = TryGetGlovePacketConfig();
+				if (packetConfig == null) { gloveAllCells = true; }
+			}
+			else
+			{
+				gloveMode = 1;
+				gloveIdle = true;
+			}
+		}
+		// 拾取/放下会让"有效格"整批变化 ⇒ 状态一变就立刻重建，不用等节流。
+		bool gloveModeChanged = (gloveMode != _lastGloveMode);
+		_lastGloveMode = gloveMode;
+
+		// ---- 没选卡 ----
+		if (packetConfig == null && !gloveIdle)
+		{
+			if (cfg.DebugShowGrid || gloveAllCells)
 			{
 				if (_cells.Count == 0 || _cellTimer >= CellRefreshInterval)
 				{
@@ -542,12 +586,26 @@ internal static class MarkerPainter
 				if (!_loggedDebug)
 				{
 					_loggedDebug = true;
-					GD.Print(PlantPlacementMarkerEntry.LogPrefix + "调试模式：未选卡也画全部格子（格数=" +
+					GD.Print(PlantPlacementMarkerEntry.LogPrefix +
+					         (cfg.DebugShowGrid ? "调试模式：未选卡也画全部格子" : "手套兜底：取不到被搬植物的 packet，改为画全部格子") +
+					         "（格数=" +
 					         _cells.Count + " 网格=" + mgr.gridNum.X + "x" + mgr.gridNum.Y +
 					         " 格尺寸=(" + mgr.gridSize.X + "," + mgr.gridSize.Y + ") 原点=(" +
 					         mgr.gridBeginPos.X + "," + mgr.gridBeginPos.Y + ")）");
 				}
 				_visible = _cells.Count > 0;
+				// 「整行整列」样式走的是 hover 判定（DrawRowColumn 里 `!_hoverPlantable` 直接 return）。
+				// 退化路径没有卡配置可判"可放置"，就按"鼠标所在格一律可放"画十字准星，
+				// 否则这条兜底在整行整列样式下会**什么都不显示**。
+				if (cfg.Style == MarkerStyle.RowColumn)
+				{
+					Vector2 fallbackWorld = GetMouseWorld(mf.mapControl);
+					Vector2I fallbackHover = mgr.GetMapGridPosFromMouse(fallbackWorld);
+					bool fallbackIn = mgr.CheckMapGridPosIn(fallbackHover);
+					_haveHover = fallbackIn;
+					if (fallbackIn) { _hover = fallbackHover; _lastHover = fallbackHover; }
+					_hoverPlantable = fallbackIn;
+				}
 				Draw(cfg, mgr, mf.mapControl.mapNode, mf.config, delta);
 				return;
 			}
@@ -570,7 +628,7 @@ internal static class MarkerPainter
 		_haveHover = hoverIn;
 		if (hoverIn) { _hover = hover; _lastHover = hover; }
 
-		bool needRefresh = hoverChanged || _cellTimer >= CellRefreshInterval;
+		bool needRefresh = hoverChanged || gloveModeChanged || _cellTimer >= CellRefreshInterval;
 
 		// ---- 整行整列 ----
 		if (cfg.Style == MarkerStyle.RowColumn)
@@ -584,8 +642,9 @@ internal static class MarkerPainter
 			{
 				_cellTimer = 0.0;
 				TowerDefenseCellInstance hc = TowerDefenseManager.GetMapCell(hover);
-				try { _hoverPlantable = GodotObject.IsInstanceValid(hc) && hc.CanPacketPlant(packetConfig); }
-				catch { _hoverPlantable = false; }
+				// ★ v2.8.4：谓词统一走 IsCellValid —— 手套空闲态判"能不能拿起来"，
+				//   选卡/拾取态判"能不能放"；绘制（DrawRowColumn）一个字都没改。
+				_hoverPlantable = IsCellValid(hc, packetConfig, gloveIdle, hover, gloveSource);
 			}
 			_visible = hoverIn && _hoverPlantable;
 			if (_visible && !_loggedShow)
@@ -600,10 +659,16 @@ internal static class MarkerPainter
 		}
 
 		// ---- 逐格标识 ----
-		if (needRefresh)
+		// ★ v2.8.4 性能：手套空闲态的"可拿起格"集合与鼠标 hover 无关（只与格子里的植物有关），
+		//   所以**不要**跟着 hover 变化重建；只在"进入该状态"或 0.15s 节流到点时算一次。
+		//   （每格要按 5 档高度比例调 GetShovelCharacter，跟着鼠标移动重建会明显浪费。）
+		bool needCellRebuild = gloveIdle
+			? (gloveModeChanged || _cellTimer >= CellRefreshInterval)
+			: needRefresh;
+		if (needCellRebuild)
 		{
 			_cellTimer = 0.0;
-			RebuildCells(mgr, packetConfig);
+			RebuildCells(mgr, packetConfig, gloveIdle, gloveSource);
 		}
 
 		_visible = _cells.Count > 0;
@@ -611,7 +676,8 @@ internal static class MarkerPainter
 		{
 			PlantPlacementMarkerEntry.FirstShowLogged = true;
 			GD.Print(PlantPlacementMarkerEntry.LogPrefix + "首次显示：样式=" + cfg.Style +
-			         " 可种格=" + _cells.Count + " 网格=" + mgr.gridNum.X + "x" + mgr.gridNum.Y +
+			         " 有效格=" + _cells.Count + (gloveIdle ? "（手套未拿起：仅可拿起的植物格）" : "") +
+			         " 网格=" + mgr.gridNum.X + "x" + mgr.gridNum.Y +
 			         " 格尺寸=(" + mgr.gridSize.X + "," + mgr.gridSize.Y + ") 原点=(" +
 			         mgr.gridBeginPos.X + "," + mgr.gridBeginPos.Y + ") 颜色=" + cfg.Tint.ToHtml() +
 			         " 行过滤=" + (_linesGated ? "启用" : "跳过"));
@@ -698,6 +764,99 @@ internal static class MarkerPainter
 		catch { return false; }
 	}
 
+	// ------------------------------------------------------------------ 手套判定（两态，v2.8.4）
+	// 宿主源码依据：unpack/Registry/Battle/Feature/Glove/TowerDefenseBattleFeatureGlove.cs
+	//   · `public bool glovePick`         —— 手套**工具是否打开**（:14）。⚠️ 刚打开、还没拿起植物时就是 true
+	//   · `public TowerDefenseCharacter pickedCharacter` —— 已拿起的植物（:16），null = 还没拿
+	//   · `public Vector2I sourceGridPos` —— 被拿起植物的源格（:18），放置时**不允许放回**（:197）
+	//   · 取得方式：`TowerDefenseManager.Instance.GetGloveFeature()`
+	//     （unpack/Core/TowerDefenseManager/TowerDefenseManager.cs:490）
+	// 两态的"有效格"谓词（见 IsCellValid）：
+	//   ① 未拿起（glovePick && pickedCharacter == null）⇒ 有植物且**能被手套拿起**
+	//      —— 判据照抄 `ProcessGloveSelect`（:186-188）：`GetShovelCharacter(pct)` 是 TowerDefensePlant
+	//         且 `CanShovel(pct)`，多档百分比探测；
+	//   ② 已拿起 ⇒ `cell.CanPacketPlant(pickedCharacter.packet)`（宿主 `ProcessGlovePlace` :204 同判据），
+	//      但排除源格 `sourceGridPos`（:197）。
+	// 两种状态画的是同一个 Draw ⇒ 样式完全一致。
+
+	private static bool _gloveWarned;
+
+	/// <summary>手套是否已打开（`glovePick == true` 且 feature 有效）。注意：**刚打开、还没拿起植物时它就已经是 true**。</summary>
+	private static bool IsGlovePicking()
+	{
+		try
+		{
+			TowerDefenseManager mgr = TowerDefenseManager.Instance;
+			if (!GodotObject.IsInstanceValid(mgr)) { return false; }
+			TowerDefenseBattleFeatureGlove glove = mgr.GetGloveFeature();
+			if (glove == null || !GodotObject.IsInstanceValid(glove)) { return false; }
+			return glove.glovePick;
+		}
+		catch { return false; }
+	}
+
+	/// <summary>
+	/// 手套是否**已经拿起**植物（`pickedCharacter` 有效）。拿起时顺带返回源格 `sourceGridPos`
+	/// （宿主 `ProcessGlovePlace`（Glove:197）不允许放回源格，拾取态要把它排除）。
+	/// </summary>
+	private static bool HasGlovePickedCharacter(out Vector2I sourceGridPos)
+	{
+		sourceGridPos = new Vector2I(int.MinValue, int.MinValue);
+		try
+		{
+			TowerDefenseManager mgr = TowerDefenseManager.Instance;
+			if (!GodotObject.IsInstanceValid(mgr)) { return false; }
+			TowerDefenseBattleFeatureGlove glove = mgr.GetGloveFeature();
+			if (glove == null || !GodotObject.IsInstanceValid(glove)) { return false; }
+			TowerDefenseCharacter picked = glove.pickedCharacter;
+			if (picked == null || !GodotObject.IsInstanceValid(picked)) { return false; }
+			sourceGridPos = glove.sourceGridPos;
+			return true;
+		}
+		catch { return false; }
+	}
+
+	/// <summary>
+	/// 取"手套正搬着的那个植物"的 packet 配置。返回 null = 没在搬 / 取不到
+	/// （取不到时日志只 Warn 一次，调用方退化为"画全部格子"）。
+	/// </summary>
+	private static TowerDefensePacketConfig TryGetGlovePacketConfig()
+	{
+		try
+		{
+			TowerDefenseManager mgr = TowerDefenseManager.Instance;
+			if (!GodotObject.IsInstanceValid(mgr)) { return null; }
+			TowerDefenseBattleFeatureGlove glove = mgr.GetGloveFeature();
+			if (glove == null || !GodotObject.IsInstanceValid(glove)) { return null; }
+			TowerDefenseCharacter picked = glove.pickedCharacter;
+			if (picked == null || !GodotObject.IsInstanceValid(picked))
+			{
+				WarnOnceGlove("手套搬运中但 pickedCharacter 无效 ⇒ 退化为显示全部可种植格。");
+				return null;
+			}
+			TowerDefensePacketConfig pkt = picked.packet;
+			if (pkt == null)
+			{
+				WarnOnceGlove("手套搬运中但被搬植物没有 packet 配置 ⇒ 退化为显示全部可种植格。");
+				return null;
+			}
+			return pkt;
+		}
+		catch (Exception e)
+		{
+			WarnOnceGlove("手套搬运判定异常（已吞）：" + e.Message);
+			return null;
+		}
+	}
+
+	/// <summary>手套兜底相关告警：只打一次，避免每帧刷屏。</summary>
+	private static void WarnOnceGlove(string msg)
+	{
+		if (_gloveWarned) { return; }
+		_gloveWarned = true;
+		try { GD.PushWarning(PlantPlacementMarkerEntry.LogPrefix + msg); } catch { }
+	}
+
 	// ------------------------------------------------------------------ RID
 	private static bool EnsureRid(Node2D host)
 	{
@@ -767,7 +926,7 @@ internal static class MarkerPainter
 		}
 	}
 
-	private static void RebuildCells(TowerDefenseManager mgr, TowerDefensePacketConfig packetConfig)
+	private static void RebuildCells(TowerDefenseManager mgr, TowerDefensePacketConfig packetConfig, bool gloveIdle, Vector2I excludePos)
 	{
 		_cells.Clear();
 		int nx = mgr.gridNum.X;
@@ -789,12 +948,68 @@ internal static class MarkerPainter
 				Vector2I gp = new Vector2I(x, y);
 				TowerDefenseCellInstance cell = TowerDefenseManager.GetMapCell(gp);
 				if (!GodotObject.IsInstanceValid(cell)) { continue; }
-				bool ok;
-				try { ok = cell.CanPacketPlant(packetConfig); }
-				catch { ok = false; }
-				if (ok) { _cells.Add(gp); }
+				if (IsCellValid(cell, packetConfig, gloveIdle, gp, excludePos)) { _cells.Add(gp); }
 			}
 		}
+	}
+
+	// ------------------------------------------------------------------ "有效格"谓词（v2.8.4）
+	// 这里是唯一的"哪些格算有效"入口：
+	//   · 手套空闲态（gloveIdle）⇒ 该格里**有植物且手套能拿起来**；
+	//   · 其它（选卡 / 手套已拿起）⇒ `cell.CanPacketPlant(packetConfig)`（能放）。
+	// 绘制侧（Draw / DrawRowColumn / CellAnchor）完全不受影响 ⇒ 两种状态样式必然一致。
+
+	/// <summary>
+	/// 手套"还没拿起植物"时的整格探测用高度比例。
+	/// 宿主 `TowerDefenseCellInstance.GetShovelCharacter(percentage)`（Cell:1344）里 percentage 只影响两个分支：
+	///   `< 0.25` 取空中槽 AIR（Cell:1347）、`> 0.5` 取环绕角色 characterSurround（Cell:1351），
+	///   其余落到通用槽位扫描 ⇒ 只探 0.5 会漏掉空中株/南瓜头/环绕藤蔓这类。
+	/// </summary>
+	private static readonly double[] GloveProbePercents = { 0.15, 0.3, 0.5, 0.7, 0.85 };
+
+	/// <summary>上一帧的手套状态（0 无 / 1 空闲 / 2 已拿起），用于"状态一变立刻重建有效格"。</summary>
+	private static int _lastGloveMode;
+
+	/// <summary>统一的有效格判定（见上方说明）。</summary>
+	private static bool IsCellValid(TowerDefenseCellInstance cell, TowerDefensePacketConfig packetConfig,
+	                                bool gloveIdle, Vector2I gridPos, Vector2I excludePos)
+	{
+		if (cell == null || !GodotObject.IsInstanceValid(cell)) { return false; }
+		try
+		{
+			if (gloveIdle) { return IsGloveSelectable(cell); }
+			// 拾取态：宿主 ProcessGlovePlace（Glove:197）明确不允许放回源格
+			if (gridPos == excludePos) { return false; }
+			if (packetConfig == null) { return false; }
+			return cell.CanPacketPlant(packetConfig);
+		}
+		catch { return false; }
+	}
+
+	/// <summary>
+	/// 该格里的植物手套能不能拿起来 —— 判据照抄宿主 `TowerDefenseBattleFeatureGlove.ProcessGloveSelect`
+	/// （Glove:186-188）：`cell.GetShovelCharacter(pct)` 得到的角色 `is TowerDefensePlant`，且 `cell.CanShovel(pct)`。
+	/// `pct` 按 <see cref="GloveProbePercents"/> 逐档探测，任一档命中即算可拿起。
+	/// 调用频率：只在 `RebuildCells` / 整行整列 hover 刷新时（0.15s 节流 + hover 变化）才跑，不是每帧每格。
+	/// </summary>
+	private static bool IsGloveSelectable(TowerDefenseCellInstance cell)
+	{
+		try
+		{
+			for (int i = 0; i < GloveProbePercents.Length; i++)
+			{
+				double pct = GloveProbePercents[i];
+				TowerDefenseCharacter ch = null;
+				try { ch = cell.GetShovelCharacter(pct); } catch { ch = null; }
+				if (ch == null || !GodotObject.IsInstanceValid(ch)) { continue; }
+				if (!(ch is TowerDefensePlant)) { continue; }   // 宿主同一判据：只有"植物"能被手套拿
+				bool can = false;
+				try { can = cell.CanShovel(pct); } catch { can = false; }
+				if (can) { return true; }
+			}
+		}
+		catch { }
+		return false;
 	}
 
 	private static Vector2 CellTopLeft(TowerDefenseManager mgr, Vector2I gridPos)

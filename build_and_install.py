@@ -145,7 +145,8 @@ def main():
         return 0
 
     p = subprocess.run([PY, os.path.join(BASE, "build_pmod.py")], capture_output=True,
-                       text=True, encoding="utf-8", errors="replace", timeout=300)
+                       text=True, encoding="utf-8", errors="replace", timeout=300,
+                       env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     log("[package] RC=%d" % p.returncode)
     log((p.stdout or "").strip())
     dist = os.path.join(DIST, MOD_NAME + ".pmod")
@@ -188,5 +189,15 @@ if __name__ == "__main__":
         rc = 1
     with open(LOG, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print("\n".join(lines))
+    # 控制台是 GBK 时，日志里任何非 GBK 字符都会让 print 抛 UnicodeEncodeError，
+    # 脚本于是以"异常"收尾 ⇒ 明明构建+装机全成功，_build_locked.py 却报 RC=1（假失败）。
+    # 与 TimeStop / WaveInfoBar 的构建脚本同款兜底：降级替换，退出码仍由 rc 决定。
+    try:
+        sys.stdout.reconfigure(encoding=sys.stdout.encoding or "utf-8", errors="replace")
+    except Exception:
+        pass
+    try:
+        print("\n".join(lines))
+    except Exception:
+        print("\n".join(lines).encode("utf-8", "replace").decode("utf-8", "replace"))
     sys.exit(rc)
